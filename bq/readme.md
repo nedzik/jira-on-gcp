@@ -84,10 +84,10 @@ SELECT
   count(*) as throughput 
 FROM 
   (
-    SELECT issue_id, EXTRACT(DATE from MAX(timestamp) AT TIME ZONE "America/Chicago") as departure 
+    SELECT issue_id, issue_type, project, EXTRACT(DATE from MAX(timestamp) AT TIME ZONE "America/Chicago") as departure 
     FROM jira.events 
     WHERE UPPER(state_name) = 'DONE' AND event_name = 'ARRIVAL' 
-    GROUP BY issue_id
+    GROUP BY issue_id, issue_type, project 
   ) as departures
 GROUP BY
   departure
@@ -124,6 +124,8 @@ ORDER BY
 ```sql
 SELECT 
     cycle_times.issue_id AS issue_id, 
+    cycle_times.completion_date AS completion_date,
+    cycle_times.issue_type AS issue_type,
     CAST(cycle_time_in_days AS float64) AS cycle_time_in_days, 
     CAST(estimate AS float64) AS estimate_in_story_points, 
     cycle_times.project AS project 
