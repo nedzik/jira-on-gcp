@@ -34,7 +34,7 @@ FROM
   (
     SELECT issue_id, MAX(timestamp) as departure 
     FROM jira.events 
-    WHERE UPPER(state_name) = 'DONE' AND event_name = 'ARRIVAL' 
+        WHERE UPPER(state_name) = 'DONE' AND event_name = 'ARRIVAL' 
     GROUP BY issue_id
   ) as departures
 WHERE 
