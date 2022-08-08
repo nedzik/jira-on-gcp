@@ -5,13 +5,13 @@ import functools
 import operator
 import os
 import sys
+from time import sleep
 
 import click
 import pytz
 from atlassian import Jira
 from google.cloud import bigquery
 from requests.exceptions import RequestException
-from time import sleep
 
 UTC = pytz.UTC
 EVENTS_TABLE = 'jira.events'
@@ -54,17 +54,18 @@ def get_issue_changelog(jira, issue):
 
 
 @retry
-def get_issues(jira, from_date, start_at):
-    jql = f"updated >= {from_date} and type in (bug, story, 'tech task')"
+def get_issues(jira, from_date, start_at, jira_filter=None):
+    jql = f"""updated >= {from_date} and type in (bug, story, 'tech task', 'tech debt')"""
+    jql = f"""{jql} and {jira_filter}""" if jira_filter else jql
     print(f"Using query '{jql}', from position {start_at} ...", file=sys.stderr)
     found = jira.jql(jql=jql, limit=100, start=start_at)
     return found
 
 
-def get_issues_from_jira(jira, from_date):
+def get_issues_from_jira(jira, from_date, jira_filter=None):
     start_at = 0
     while True:
-        found = get_issues(jira, from_date, start_at)
+        found = get_issues(jira, from_date, start_at, jira_filter)
         total = found.get('total', 0)
         print(f"Got {len(found['issues'])} out of {total} issues. Processing ...", file=sys.stderr)
         for issue in found['issues']: yield issue
@@ -216,7 +217,7 @@ def scheduler(event, context):
     jira_scan_offset = int(os.getenv('JIRA_SCAN_OFFSET', '1'))
     print(' - scanning for candidates with new events ...')
     from_date = (datetime.datetime.now() - datetime.timedelta(days=jira_scan_offset))
-    candidate_issues = [x for x in get_issues_from_jira(jira, f'{from_date:%Y-%m-%d}')];
+    candidate_issues = [x for x in get_issues_from_jira(jira, f'{from_date:%Y-%m-%d}')]
     if candidate_issues:
         print(f' - found {len(candidate_issues)} candidates. Retrieving their info from BQ ...')
         timestamps_by_id = get_latest_timestamps_from_bq(bq_client, candidate_issues)
@@ -246,17 +247,25 @@ def extract_bq_item_rows_from_issues(issues):
 
 @click.command()
 @click.option('-f', '--from-date', type=click.DateTime(formats=['%Y-%m-%d']), default='2021-10-01')
-def load_issues(from_date):
+@click.option('-o', '--output', type=str, default='bq')
+@click.option('-j', '--jira-filter', type=str, default=None)
+def load_issues(from_date, output, jira_filter):
     print(f' - starting the schedule event loader ...')
     print(f' --- will attempt to load issues starting from {from_date:%Y-%m-%d}')
     bq_client = create_bq_client()
-    if not events_table_is_empty(bq_client, ISSUES_TABLE):
+    if output == 'bq' and not events_table_is_empty(bq_client, ISSUES_TABLE):
         print(f' --- {ISSUES_TABLE} is not empty or its status is unknown. Exiting ...')
         return
     jira = initialize_jira()
-    issues = get_issues_from_jira(jira, f'{from_date:%Y-%m-%d}')
-    bq_rows = extract_bq_item_rows_from_issues(issues)
-    insert_rows_into_bq(bq_client, ISSUES_TABLE, bq_rows)
+    issues = get_issues_from_jira(jira, f'{from_date:%Y-%m-%d}', jira_filter)
+    if output == 'bq':
+        bq_rows = extract_bq_item_rows_from_issues(issues)
+        insert_rows_into_bq(bq_client, ISSUES_TABLE, bq_rows)
+    else:
+        print('ID,estimate,value')
+        for x in [i for i in issues if i['key'].startswith('ON-')]:
+            value = x['fields']['customfield_11121']['value'] if 'customfield_11121' in x['fields'] else 'None'
+            print(f'''{x['key']},{x['fields']['customfield_11020']},{value}''')
     print('Done.')
 
 
