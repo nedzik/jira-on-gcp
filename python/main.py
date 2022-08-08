@@ -263,7 +263,7 @@ def load_issues(from_date, output, jira_filter):
         insert_rows_into_bq(bq_client, ISSUES_TABLE, bq_rows)
     else:
         print('ID,estimate,value')
-        for x in [i for i in issues if i['key'].startswith('ON-')]:
+        for x in issues:
             value = x['fields']['customfield_11121']['value'] if 'customfield_11121' in x['fields'] else 'None'
             print(f'''{x['key']},{x['fields']['customfield_11020']},{value}''')
     print('Done.')
