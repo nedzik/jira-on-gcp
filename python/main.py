@@ -26,7 +26,7 @@ EVENT_TYPE_ID_MAP = {
 
 # Helpers - JIRA
 def initialize_jira():
-    print(f' - initializing JIRA API ...')
+    print(f' - initializing JIRA API ...', file=sys.stderr)
     url = os.getenv('JIRA_URL', 'https://shiftkey.atlassian.net')
     username = os.getenv('JIRA_USERNAME')
     api_access_token = os.getenv('JIRA_API_TOKEN')
@@ -39,12 +39,13 @@ def retry(func):
             try:
                 return func(*args, **kwargs)
             except RequestException as re:
-                print(f' - caught an exception {type(re)}')
+                print(f' - caught an exception {type(re)}', file=sys.stderr)
                 if count == 4:
                     raise
                 else:
                     sleep(5)
-                    print(f' - retrying ...')
+                    print(f' - retrying ...', file=sys.stderr)
+
     return wrapper
 
 
@@ -121,7 +122,7 @@ def extract_bq_rows_from_issue(jira, issue):
 
 # Helpers - BQ operations
 def events_table_is_empty(client, table):
-    print(f' - checking there is no data in {table  } ...')
+    print(f' - checking there is no data in {table} ...', file=sys.stderr)
     query = f'''SELECT count(*) as row_count from {table}'''
     return next((x.row_count for x in client.query(query)), -1) == 0
 
@@ -142,17 +143,17 @@ def get_latest_timestamps_from_bq(bq_client, issues):
 
 def insert_rows_into_bq(bq_client, bq_table, bq_rows):
     batch_size = 10000
-    print(f' - inserting {len(bq_rows)} row(s) into {bq_table} ...')
+    print(f' - inserting {len(bq_rows)} row(s) into {bq_table} ...', file=sys.stderr)
     for index in range(0, len(bq_rows), batch_size):
         batch_rows = bq_rows[index:index + batch_size]
-        print(f' --- inserting next {len(batch_rows)} rows starting from offset {index} ...')
+        print(f' --- inserting next {len(batch_rows)} rows starting from offset {index} ...', file=sys.stderr)
         errors = bq_client.insert_rows_json(bq_table, batch_rows, row_ids=[None] * len(batch_rows))
         if errors:
-            print(f' --- aborting due to the errors encountered while inserting rows:')
-            for x in errors: print(f' ----- {x}')
+            print(f' --- aborting due to the errors encountered while inserting rows:', file=sys.stderr)
+            for x in errors: print(f' ----- {x}', file=sys.stderr)
             return
-        print(f' --- inserted {len(batch_rows)} row(s) into {bq_table}.')
-    print(f' - done inserting {len(bq_rows)} row(s) into {bq_table}.')
+        print(f' --- inserted {len(batch_rows)} row(s) into {bq_table}.', file=sys.stderr)
+    print(f' - done inserting {len(bq_rows)} row(s) into {bq_table}.', file=sys.stderr)
 
 
 def to_datetime_utc(timestamp):
@@ -166,27 +167,29 @@ def extract_new_bq_rows_from_candidates(jira, candidate_issues, timestamps_by_id
         issue_id = candidate_issue[u'key']
         issue_last_updated = datetime.datetime.strptime(candidate_issue['fields']['updated'], TIMESTAMP_FORMAT)
         issue_last_updated_utc = datetime.datetime.utcfromtimestamp(float(issue_last_updated.strftime("%s")))
-        print(f' - considering JIRA item {issue_id}, last updated in JIRA on {issue_last_updated_utc} ...')
+        print(f' - considering JIRA item {issue_id}, last updated in JIRA on {issue_last_updated_utc} ...',
+              file=sys.stderr)
         bq_last_updated = timestamps_by_id.get(issue_id, None)
-        print(f' - the latest event in BQ for {issue_id} was on {bq_last_updated} ...')
+        print(f' - the latest event in BQ for {issue_id} was on {bq_last_updated} ...', file=sys.stderr)
         if not bq_last_updated or bq_last_updated < issue_last_updated:
             message = 'a brand new item' if not bq_last_updated else f'the item has new events after {bq_last_updated}'
-            print(f''' --- {message}. Processing ...''')
+            print(f''' --- {message}. Processing ...''', file=sys.stderr)
             bq_rows += extract_new_bq_rows_from_candidate(jira, candidate_issue, bq_last_updated, issue_last_updated)
         else:
-            print(f' --- up-to-date in {EVENTS_TABLE} (last time updated on {bq_last_updated}. Skipping ...')
+            print(f' --- up-to-date in {EVENTS_TABLE} (last time updated on {bq_last_updated}. Skipping ...',
+                  file=sys.stderr)
     return bq_rows
 
 
 def extract_new_bq_rows_from_candidate(jira, candidate_issue, bq_last_updated, issue_last_updated):
     bq_rows_from_item = extract_bq_rows_from_issue(jira, candidate_issue)
-    print(f' --- all items ({len(bq_rows_from_item)}) ...')
-    for x in bq_rows_from_item: print(x)
+    print(f' --- all items ({len(bq_rows_from_item)}) ...', file=sys.stderr)
+    for x in bq_rows_from_item: print(x, file=sys.stderr)
     selected_bq_rows_from_item = [
         x for x in bq_rows_from_item if to_datetime_utc(x[u'timestamp']) > bq_last_updated
     ] if bq_last_updated and bq_last_updated < issue_last_updated else bq_rows_from_item
-    print(f' --- selected items ({len(selected_bq_rows_from_item)})...')
-    for x in selected_bq_rows_from_item: print(x)
+    print(f' --- selected items ({len(selected_bq_rows_from_item)})...', file=sys.stderr)
+    for x in selected_bq_rows_from_item: print(x, file=sys.stderr)
     return selected_bq_rows_from_item
 
 
@@ -208,37 +211,37 @@ def create_bq_client():
 # For each found story/defect, issues a PubSub message that updater Cloud Function will process
 # noinspection PyUnusedLocal
 def scheduler(event, context):
-    print(' - starting the scheduler ...')
+    print(' - starting the scheduler ...', file=sys.stderr)
     bq_client = create_bq_client()
     if events_table_is_empty(bq_client, EVENTS_TABLE):
-        print(f' --- {EVENTS_TABLE} is still empty. Please perform the initial data load. Exiting ...')
+        print(f' --- {EVENTS_TABLE} is still empty. Please perform the initial data load. Exiting ...', file=sys.stderr)
         return
     jira = initialize_jira()
     jira_scan_offset = int(os.getenv('JIRA_SCAN_OFFSET', '1'))
-    print(' - scanning for candidates with new events ...')
+    print(' - scanning for candidates with new events ...', file=sys.stderr)
     from_date = (datetime.datetime.now() - datetime.timedelta(days=jira_scan_offset))
     candidate_issues = [x for x in get_issues_from_jira(jira, f'{from_date:%Y-%m-%d}')]
     if candidate_issues:
-        print(f' - found {len(candidate_issues)} candidates. Retrieving their info from BQ ...')
+        print(f' - found {len(candidate_issues)} candidates. Retrieving their info from BQ ...', file=sys.stderr)
         timestamps_by_id = get_latest_timestamps_from_bq(bq_client, candidate_issues)
         bq_rows = extract_new_bq_rows_from_candidates(jira, candidate_issues, timestamps_by_id)
         insert_rows_into_bq(bq_client, EVENTS_TABLE, bq_rows)
-    print(f'Done.')
+    print(f'Done.', file=sys.stderr)
 
 
 # Bulk loader of JIRA events into BQ. Scans for all stories/defects that have been updates since from_date
 @click.command()
 @click.option('-f', '--from-date', type=click.DateTime(formats=['%Y-%m-%d']), default='2021-10-01')
 def load_events(from_date):
-    print(f' - starting the schedule event loader ...')
-    print(f' --- will attempt to load events starting from {from_date:%Y-%m-%d}')
+    print(f' - starting the schedule event loader ...', file=sys.stderr)
+    print(f' --- will attempt to load events starting from {from_date:%Y-%m-%d}', file=sys.stderr)
     bq_client = create_bq_client()
     if not events_table_is_empty(bq_client, EVENTS_TABLE):
-        print(f' --- {EVENTS_TABLE} is not empty or its status is unknown. Exiting ...')
+        print(f' --- {EVENTS_TABLE} is not empty or its status is unknown. Exiting ...', file=sys.stderr)
         return
     jira = initialize_jira()
     insert_rows_into_bq(bq_client, EVENTS_TABLE, get_bq_rows_from_jira(jira, from_date))
-    print('Done.')
+    print('Done.', file=sys.stderr)
 
 
 def extract_bq_item_rows_from_issues(issues):
@@ -250,11 +253,11 @@ def extract_bq_item_rows_from_issues(issues):
 @click.option('-o', '--output', type=str, default='bq')
 @click.option('-j', '--jira-filter', type=str, default=None)
 def load_issues(from_date, output, jira_filter):
-    print(f' - starting the schedule event loader ...')
-    print(f' --- will attempt to load issues starting from {from_date:%Y-%m-%d}')
+    print(f' - starting the schedule event loader ...', file=sys.stderr)
+    print(f' --- will attempt to load issues starting from {from_date:%Y-%m-%d}', file=sys.stderr)
     bq_client = create_bq_client()
     if output == 'bq' and not events_table_is_empty(bq_client, ISSUES_TABLE):
-        print(f' --- {ISSUES_TABLE} is not empty or its status is unknown. Exiting ...')
+        print(f' --- {ISSUES_TABLE} is not empty or its status is unknown. Exiting ...', file=sys.stderr)
         return
     jira = initialize_jira()
     issues = get_issues_from_jira(jira, f'{from_date:%Y-%m-%d}', jira_filter)
@@ -266,7 +269,7 @@ def load_issues(from_date, output, jira_filter):
         for x in issues:
             value = x['fields']['customfield_11121']['value'] if 'customfield_11121' in x['fields'] else 'None'
             print(f'''{x['key']},{x['fields']['customfield_11020']},{value}''')
-    print('Done.')
+    print('Done.', file=sys.stderr)
 
 
 @click.group()
@@ -282,7 +285,6 @@ def sync():
 
 FORECAST_HELP = 'runs a simulation with backlog size or future date goal using throughput data from the BQ dataset'
 DATE_RANGE_HELP = 'use throughput data from within the date range'
-
 
 # @click.command(help=FORECAST_HELP)
 # @click.argument('goal')
