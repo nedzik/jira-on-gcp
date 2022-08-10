@@ -55,7 +55,7 @@ def get_issue_changelog(jira, issue):
 
 @retry
 def get_issues(jira, from_date, start_at):
-    jql = f"updated >= {from_date} and type in (bug, story, 'tech task')"
+    jql = f"updated >= {from_date} and type in (bug, story, 'tech task', 'tech debt')"
     print(f"Using query '{jql}', from position {start_at} ...", file=sys.stderr)
     found = jira.jql(jql=jql, limit=100, start=start_at)
     return found

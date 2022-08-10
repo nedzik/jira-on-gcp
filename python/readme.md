@@ -38,7 +38,7 @@ within the scan window. One can run it outside of GCP by following these steps:
 * Set ```RALLY_SCAN_OFFSET``` to a different number of days if desired
 * Run the scheduler handler:
 ```bash
-python main.py scheduler
+python main.py sync
 ```
 
 ## Getting Rally paths available in the BQ dataset
