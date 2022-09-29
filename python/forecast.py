@@ -21,16 +21,18 @@ def prepare_throughput_data(bq_data, date_range):
     return [bq_data.get(x, 0) for x in dates]
 
 
-def get_throughput_data_from_bq(bq_client, path_to_root, sample_date_range):
+# noinspection PyTypeChecker
+def get_throughput_data_from_bq(bq_client, project_name, sample_date_range, issue_types):
+    issue_types_where_clause = '''AND UPPER(issue_type) IN UNNEST(@ISSUE_TYPES)''' if issue_types else ''
     query = f'''
         SELECT departure as completion_date, count(*) as throughput 
         FROM 
           (
-            SELECT rally_id, EXTRACT(DATE from MAX(timestamp) AT TIME ZONE "America/Chicago") as departure 
-            FROM rally.schedule_events 
-            WHERE schedule_state_name = 'ACCEPTED' AND event_type_name = 'ARRIVAL' AND 
-                STARTS_WITH(path_to_root, @PATH_TO_ROOT)
-            GROUP BY rally_id
+            SELECT issue_id, EXTRACT(DATE from MAX(timestamp) AT TIME ZONE "America/Chicago") as departure 
+            FROM jira.events 
+            WHERE UPPER(state_name) = 'DONE' AND UPPER(event_name) = 'ARRIVAL' 
+                AND project = @PROJECT_NAME {issue_types_where_clause}
+            GROUP BY issue_id
           ) as departures
         GROUP BY
           departure
@@ -38,7 +40,10 @@ def get_throughput_data_from_bq(bq_client, path_to_root, sample_date_range):
           departure
     '''
     job_config = bigquery.QueryJobConfig()
-    job_config.query_parameters = [bigquery.ScalarQueryParameter('PATH_TO_ROOT', 'STRING', path_to_root)]
+    job_config.query_parameters = [
+        bigquery.ScalarQueryParameter('PROJECT_NAME', 'STRING', project_name),
+        bigquery.ArrayQueryParameter('ISSUE_TYPES', 'STRING', [x.upper() for x in issue_types])
+    ]
     return dict([
         (x.completion_date, x.throughput) for x in bq_client.query(query, job_config=job_config) if
         is_within_date_range(sample_date_range, x.completion_date)
@@ -105,11 +110,12 @@ def get_date(ci_95_lower):
     return datetime.date.today() + datetime.timedelta(days=ci_95_lower)
 
 
-def print_information_header(goal, count, path_to_root, sample_date_range):
+def print_information_header(goal, count, project_name, sample_date_range, issue_types):
     print(f' - starting the forecaster ...')
     print(f' --- goal: {get_goal_description(goal)}')
-    print(f''' --- path to root starting with: '{path_to_root}' ''')
+    print(f''' --- project: '{project_name}' ''')
     print(f''' --- throughput data: {format_date_range(sample_date_range)}''')
+    print(f''' --- issue types to include: {','.join(issue_types) if issue_types else 'all'}''')
     print(f' --- experiment count: {count}')
 
 

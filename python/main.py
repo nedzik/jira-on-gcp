@@ -13,6 +13,9 @@ from google.cloud import bigquery
 from requests.exceptions import RequestException
 from time import sleep
 
+from forecast import print_information_header, get_throughput_data_from_bq, prepare_throughput_data, \
+    get_simulation, print_simulation_results
+
 UTC = pytz.UTC
 EVENTS_TABLE = 'jira.events'
 ISSUES_TABLE = 'jira.issues'
@@ -275,24 +278,25 @@ FORECAST_HELP = 'runs a simulation with backlog size or future date goal using t
 DATE_RANGE_HELP = 'use throughput data from within the date range'
 
 
-# @click.command(help=FORECAST_HELP)
-# @click.argument('goal')
-# @click.argument('path-to-root')
-# @click.option('-r', '--sample-date-range', nargs=2, type=click.DateTime(formats=['%Y-%m-%d']), help=DATE_RANGE_HELP)
-# @click.option('-c', '--experiment-count', 'count', default=1000, type=int, show_default=True)
-# # TODO: add support for options: a) weekday-to-weekday simulation, b) include weekends
-# def forecast(goal, path_to_root, sample_date_range, count):
-#     print_information_header(goal, count, path_to_root, sample_date_range)
-#     bq_throughput_data = get_throughput_data_from_bq(bigquery.Client(), path_to_root, sample_date_range)
-#     data = prepare_throughput_data(bq_throughput_data, sample_date_range)
-#     run_simulation = get_simulation(goal)
-#     results = [run_simulation(data, goal) for _ in range(count)]
-#     print_simulation_results(results, goal)
+@click.command(help=FORECAST_HELP)
+@click.argument('goal')
+@click.argument('project')
+@click.option('-r', '--sample-date-range', nargs=2, type=click.DateTime(formats=['%Y-%m-%d']), help=DATE_RANGE_HELP)
+@click.option('-c', '--experiment-count', 'count', default=1000, type=int, show_default=True)
+@click.option('-t', '--issue-types', default=None, type=str, multiple=True)
+# TODO: add support for options: a) weekday-to-weekday simulation, b) include weekends
+def forecast(goal, project, sample_date_range, count, issue_types):
+    print_information_header(goal, count, project, sample_date_range, issue_types)
+    bq_throughput_data = get_throughput_data_from_bq(create_bq_client(), project, sample_date_range, issue_types)
+    data = prepare_throughput_data(bq_throughput_data, sample_date_range)
+    run_simulation = get_simulation(goal)
+    results = [run_simulation(data, goal) for _ in range(count)]
+    print_simulation_results(results, goal)
 
 
 if __name__ == '__main__':
     cli.add_command(load_events)
     cli.add_command(sync)
     cli.add_command(load_issues)
-    # cli.add_command(forecast)
+    cli.add_command(forecast)
     cli()
