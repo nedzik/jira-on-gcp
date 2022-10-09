@@ -16,6 +16,7 @@ from time import sleep
 from forecast import print_information_header, get_throughput_data_from_bq, prepare_throughput_data, \
     get_simulation, print_simulation_results
 
+DONE = 'Done.'
 UTC = pytz.UTC
 EVENTS_TABLE = 'jira.events'
 ISSUES_TABLE = 'jira.issues'
@@ -219,13 +220,13 @@ def scheduler(event, context):
     jira_scan_offset = int(os.getenv('JIRA_SCAN_OFFSET', '1'))
     print(' - scanning for candidates with new events ...')
     from_date = (datetime.datetime.now() - datetime.timedelta(days=jira_scan_offset))
-    candidate_issues = [x for x in get_issues_from_jira(jira, f'{from_date:%Y-%m-%d}')];
+    candidate_issues = [x for x in get_issues_from_jira(jira, f'{from_date:%Y-%m-%d}')]
     if candidate_issues:
         print(f' - found {len(candidate_issues)} candidates. Retrieving their info from BQ ...')
         timestamps_by_id = get_latest_timestamps_from_bq(bq_client, candidate_issues)
         bq_rows = extract_new_bq_rows_from_candidates(jira, candidate_issues, timestamps_by_id)
         insert_rows_into_bq(bq_client, EVENTS_TABLE, bq_rows)
-    print(f'Done.')
+    print(DONE)
 
 
 # Bulk loader of JIRA events into BQ. Scans for all stories/defects that have been updates since from_date
@@ -240,7 +241,7 @@ def load_events(from_date):
         return
     jira = initialize_jira()
     insert_rows_into_bq(bq_client, EVENTS_TABLE, get_bq_rows_from_jira(jira, from_date))
-    print('Done.')
+    print(DONE)
 
 
 def extract_bq_item_rows_from_issues(issues):
@@ -260,7 +261,39 @@ def load_issues(from_date):
     issues = get_issues_from_jira(jira, f'{from_date:%Y-%m-%d}')
     bq_rows = extract_bq_item_rows_from_issues(issues)
     insert_rows_into_bq(bq_client, ISSUES_TABLE, bq_rows)
-    print('Done.')
+    print(DONE)
+
+
+def get_key_changes(jira, issue):
+    key_changes = [
+        (datetime.datetime.strptime(h['created'], TIMESTAMP_FORMAT), i) for h
+        in get_issue_changelog(jira, issue)['histories']
+        for i in h['items'] if i['field'] == 'Key'
+    ]
+    if not key_changes: return None
+    sorted_key_changes = sorted(key_changes, key=lambda x: x[0])
+    return [x[1]['fromString'] for x in sorted_key_changes], sorted_key_changes[-1][1]['toString']
+
+
+@click.command()
+@click.option('-f', '--from-date', type=click.DateTime(formats=['%Y-%m-%d']), default='2021-10-01')
+def fix_issues(from_date):
+    bq_client = create_bq_client()
+    jira = initialize_jira()
+    for issue in get_issues_from_jira(jira, f'{from_date:%Y-%m-%d}'):
+        key_changes = get_key_changes(jira, issue)
+        if key_changes:
+            print(f""" - analyzing ID change: {','.join(key_changes[0])} -> {key_changes[1]}""", file=sys.stderr)
+            query = '''SELECT COUNT(*) as record_count from jira.events WHERE issue_id IN UNNEST(@ISSUE_IDS)'''
+            job_config = bigquery.QueryJobConfig()
+            # noinspection PyTypeChecker
+            job_config.query_parameters = [bigquery.ArrayQueryParameter('ISSUE_IDS', 'STRING', key_changes[0])]
+            record_count = [x for x in bq_client.query(query, job_config=job_config)][0].record_count
+            if record_count:
+                print(f""" --- found {record_count} record(s) for old ID(s), cleaning up ...""", file=sys.stderr)
+                query = '''DELETE FROM jira.events WHERE issue_id IN UNNEST(@ISSUE_IDS)'''
+                bq_client.query(query, job_config=job_config)
+    print(DONE)
 
 
 @click.group()
@@ -299,4 +332,5 @@ if __name__ == '__main__':
     cli.add_command(sync)
     cli.add_command(load_issues)
     cli.add_command(forecast)
+    cli.add_command(fix_issues)
     cli()
